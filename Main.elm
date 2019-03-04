@@ -1,15 +1,20 @@
 module Main exposing (main)
 
 import Browser exposing (Document)
+import Browser.Dom
+import Browser.Events
 import Element
     exposing
         ( Attr
+        , DeviceClass(..)
         , Element
+        , Orientation(..)
         , alignBottom
         , alignRight
         , alignTop
         , centerX
         , centerY
+        , classifyDevice
         , column
         , el
         , fill
@@ -160,6 +165,8 @@ type alias Model =
     , timeZone : Time.Zone
     , issue : Issue
     , timeInput : String
+    , width : Int
+    , height : Int
     }
 
 
@@ -182,8 +189,13 @@ init flags =
       , timeZone = Time.utc
       , issue = ""
       , timeInput = ""
+      , width = 1280
+      , height = 720
       }
-    , Task.perform SetTimezone Time.here
+    , Cmd.batch
+        [ Task.perform SetTimezone Time.here
+        , Task.perform (\viewport -> WindowResize (round viewport.viewport.width) (round viewport.viewport.height)) Browser.Dom.getViewport
+        ]
     )
 
 
@@ -194,6 +206,7 @@ type Msg
     | CreateEntryWithIssue Issue
     | CreateWithTime Issue Time
     | ChangeIssue String
+    | WindowResize Int Int
     | ChangeTimeInput String
     | NowPressed
 
@@ -315,6 +328,9 @@ update msg model =
     case msg of
         NoOp ->
             ( model, Cmd.none )
+
+        WindowResize width height ->
+            ( { model | width = width, height = height }, Cmd.none )
 
         ChangeIssue newIssue ->
             ( { model | issue = newIssue }, Cmd.none )
@@ -444,7 +460,7 @@ white =
 
 renderQuickButton : Issue -> Element Msg
 renderQuickButton issue =
-    el [ Background.color blue, Font.color white, Border.rounded 200, Font.size 12 ]
+    el [ Background.color blue, Font.color white, Border.rounded 200, Font.size 14 ]
         (Input.button [ padding 8 ]
             { onPress = Just (CreateEntryWithIssue issue)
             , label = text issue
@@ -454,15 +470,57 @@ renderQuickButton issue =
 
 renderTitle : String -> Element Msg
 renderTitle title =
-    el [ Font.size 20 ] (text title)
+    el [ Font.size 20, Font.heavy ] (text title)
 
 
 view : Model -> Document Msg
 view model =
+    let
+        device =
+            classifyDevice { width = model.width, height = model.height }
+
+        narrow =
+            case ( device.class, device.orientation ) of
+                ( Phone, _ ) ->
+                    True
+
+                ( Tablet, Portrait ) ->
+                    True
+
+                ( Tablet, Landscape ) ->
+                    False
+
+                ( Desktop, _ ) ->
+                    False
+
+                ( BigDesktop, _ ) ->
+                    False
+
+        container =
+            if narrow then
+                column
+
+            else
+                row
+    in
     { title = "Timetracker"
     , body =
-        [ Element.layout [ Background.color (rgba 0 0 0 0.1) ] <|
-            row [ spacing 30, centerX, centerY, width (fill |> maximum 1000) ]
+        [ Element.layout [ padding 30, Background.color (rgba 0 0 0 0.1) ] <|
+            container
+                [ spacing 30
+                , centerX
+                , centerY
+                , width
+                    (fill
+                        |> maximum
+                            (if narrow then
+                                500
+
+                             else
+                                1000
+                            )
+                    )
+                ]
                 [ column [ alignTop, width (fillPortion 1), spacing 20 ]
                     [ renderTitle "Log"
                     , row [ width fill ]
@@ -533,16 +591,29 @@ view model =
                                 |> List.map (renderEntry model.timeZone)
                            )
                     )
-                , column [ alignTop, width (fillPortion 1) ]
-                    [ column [ width fill, Font.size 16, spacing 16 ]
-                        ([ renderTitle "Summary" ]
-                            ++ List.map
-                                (\( issue, duration ) ->
-                                    row [ width fill ] [ text issue, el [ alignRight ] (text <| durationToString duration) ]
+                , column [ alignTop, width (fillPortion 1), spacing 12 ]
+                    ([ renderTitle "Summary" ]
+                        ++ [ column [ width fill, Font.size 16 ]
+                                (List.indexedMap
+                                    (\index ( issue, duration ) ->
+                                        row
+                                            [ width fill
+                                            , paddingXY 8 16
+                                            , Border.rounded 3
+                                            , Background.color
+                                                (if modBy 2 index == 1 then
+                                                    rgba 0 0 0 0
+
+                                                 else
+                                                    rgb255 240 240 240
+                                                )
+                                            ]
+                                            [ text issue, el [ alignRight ] (text <| durationToString duration) ]
+                                    )
+                                    (calculateTotals model.log)
                                 )
-                                (calculateTotals model.log)
-                        )
-                    ]
+                           ]
+                    )
                 ]
         ]
     }
@@ -550,4 +621,4 @@ view model =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    Sub.none
+    Browser.Events.onResize WindowResize
