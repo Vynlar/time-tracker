@@ -45,6 +45,7 @@ import Parser exposing ((|.), (|=), Parser)
 import Set
 import Task
 import Time
+import Tuple
 
 
 main =
@@ -138,7 +139,11 @@ makeTime hours minutes segment =
                     12
 
         realHours =
-            hours + offset
+            if hours == 12 then
+                offset
+
+            else
+                hours + offset
     in
     Time (realHours * 60 + minutes)
 
@@ -294,6 +299,28 @@ durationToString duration =
         |> String.join " "
 
 
+addTimes : Time -> Time -> Time
+addTimes (Time a) (Time b) =
+    Time (a + b)
+
+
+removeDuplicates : List ( String, Int ) -> List ( String, Int )
+removeDuplicates list =
+    case list of
+        [] ->
+            []
+
+        x :: [] ->
+            [ x ]
+
+        x :: y :: xs ->
+            if Tuple.first x == Tuple.first y then
+                ( Tuple.first x, Tuple.second x + Tuple.second y ) :: removeDuplicates xs
+
+            else
+                x :: y :: removeDuplicates xs
+
+
 calculateTotals : Log -> List ( String, Int )
 calculateTotals log =
     List.map2 (\x y -> ( x, y )) log (List.tail log |> Maybe.withDefault [])
@@ -326,6 +353,8 @@ calculateTotals log =
                 in
                 ( issue, duration )
             )
+        |> List.sortBy Tuple.first
+        |> removeDuplicates
 
 
 posixToTime : Time.Zone -> Time.Posix -> Time
