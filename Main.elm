@@ -126,9 +126,21 @@ timeToSegment time =
         PM
 
 
-makeTime : Hours -> Minutes -> Time
-makeTime hours minutes =
-    Time (hours * 60 + minutes)
+makeTime : Hours -> Minutes -> Segment -> Time
+makeTime hours minutes segment =
+    let
+        offset =
+            case segment of
+                AM ->
+                    0
+
+                PM ->
+                    12
+
+        realHours =
+            hours + offset
+    in
+    Time (realHours * 60 + minutes)
 
 
 type Entry
@@ -174,17 +186,34 @@ type alias Flags =
     {}
 
 
+formValid : { timeInput : String, issue : String } -> Bool
+formValid { timeInput, issue } =
+    let
+        timeResult =
+            timeInput
+                |> Parser.run parseTime
+
+        timeValid =
+            case timeResult of
+                Err _ ->
+                    False
+
+                Ok _ ->
+                    True
+    in
+    timeInput /= "" && issue /= "" && timeValid
+
+
 init : Flags -> ( Model, Cmd Msg )
 init flags =
     ( { log =
-            [ In (makeTime 9 0) "GBC-10"
-            , In (makeTime 9 15) "GBC-457"
-            , Out (makeTime 12 5)
-            , Out (makeTime 12 20)
-            , In (makeTime 13 0) "GBC-457"
-            , In (makeTime 13 45) "GBC-342"
-            , In (makeTime 17 45) "MD-120"
-            , Out (makeTime 18 5)
+            [ In (makeTime 9 0 AM) "GBC-10"
+            , In (makeTime 9 15 AM) "GBC-457"
+            , Out (makeTime 12 5 PM)
+            , In (makeTime 1 0 PM) "GBC-457"
+            , In (makeTime 1 45 PM) "GBC-342"
+            , In (makeTime 5 45 PM) "MD-120"
+            , Out (makeTime 6 5 PM)
             ]
       , timeZone = Time.utc
       , issue = ""
@@ -222,18 +251,11 @@ parseTime =
         |= Parser.int
         |. Parser.symbol ":"
         |= Parser.int
-
-
-posixToTime : Time.Zone -> Time.Posix -> Time
-posixToTime zone posix =
-    let
-        hours =
-            Time.toHour zone posix
-
-        minutes =
-            Time.toMinute zone posix
-    in
-    Time (hours * 60 + minutes)
+        |. Parser.spaces
+        |= Parser.oneOf
+            [ Parser.map (\_ -> AM) (Parser.keyword "AM")
+            , Parser.map (\_ -> PM) (Parser.keyword "PM")
+            ]
 
 
 createEntry : Issue -> Model -> ( Model, Cmd Msg )
@@ -306,8 +328,8 @@ calculateTotals log =
             )
 
 
-posixToString : Time.Zone -> Time.Posix -> String
-posixToString zone posix =
+posixToTime : Time.Zone -> Time.Posix -> Time
+posixToTime zone posix =
     let
         hours =
             Time.toHour zone posix
@@ -315,12 +337,7 @@ posixToString zone posix =
         minutes =
             Time.toMinute zone posix
     in
-    String.fromInt hours
-        ++ ":"
-        ++ (minutes
-                |> String.fromInt
-                |> String.padLeft 2 '0'
-           )
+    makeTime hours minutes AM
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -336,7 +353,7 @@ update msg model =
             ( { model | issue = newIssue }, Cmd.none )
 
         ChangeTimeInput newTime ->
-            ( { model | timeInput = newTime }, Cmd.none )
+            ( { model | timeInput = String.toUpper newTime }, Cmd.none )
 
         SetTimezone zone ->
             ( { model | timeZone = zone }, Cmd.none )
@@ -356,7 +373,7 @@ update msg model =
             createEntry issue model
 
         NowPressed ->
-            ( model, Task.perform (\posix -> ChangeTimeInput (posixToString model.timeZone posix)) Time.now )
+            ( model, Task.perform (\posix -> ChangeTimeInput ((timeToString << posixToTime model.timeZone) posix)) Time.now )
 
 
 segmentToString : Segment -> String
@@ -502,6 +519,9 @@ view model =
 
             else
                 row
+
+        valid =
+            formValid { timeInput = model.timeInput, issue = model.issue }
     in
     { title = "Timetracker"
     , body =
@@ -581,8 +601,32 @@ view model =
                             )
                         ]
                     , Input.button
-                        [ paddingXY 16 12, Background.color blue, Font.size 16, Font.color white, Border.rounded 5 ]
-                        { onPress = Just CreateEntry, label = text "Create" }
+                        [ paddingXY 16 12
+                        , Background.color
+                            (if valid then
+                                blue
+
+                             else
+                                rgb255 200 200 200
+                            )
+                        , Font.size 16
+                        , Font.color
+                            (if valid then
+                                white
+
+                             else
+                                rgb255 150 150 150
+                            )
+                        , Border.rounded 5
+                        ]
+                        { onPress =
+                            if valid then
+                                Just CreateEntry
+
+                            else
+                                Nothing
+                        , label = text "Create"
+                        }
                     ]
                 , column [ alignTop, spacing 10, width (fillPortion 1) ]
                     ([ renderTitle "Entries" ]
