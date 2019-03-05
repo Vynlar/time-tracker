@@ -321,6 +321,10 @@ removeDuplicates list =
                 x :: y :: removeDuplicates xs
 
 
+
+-- TODO: add the current time to the end of the log always to determine the duration of the very last issue
+
+
 calculateTotals : Log -> List ( String, Int )
 calculateTotals log =
     List.map2 (\x y -> ( x, y )) log (List.tail log |> Maybe.withDefault [])
