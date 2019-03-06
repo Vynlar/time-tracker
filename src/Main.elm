@@ -209,12 +209,16 @@ formValid { timeInput, issue } =
 init : Flags -> ( Model, Cmd Msg )
 init flags =
     ( { log =
-            [ In (makeTime 9 0 AM) "GBC-457"
-            , In (makeTime 9 15 AM) "GBC-457"
-            , In (makeTime 9 10 AM) "GBC-456"
-            , In (makeTime 10 15 AM) "GBC-457"
-            , Out (makeTime 12 15 PM)
-            ]
+            []
+
+      {-
+         [ In (makeTime 9 0 AM) "GBC-457"
+         , In (makeTime 9 15 AM) "GBC-457"
+         , In (makeTime 9 10 AM) "GBC-456"
+         , In (makeTime 10 15 AM) "GBC-457"
+         , Out (makeTime 12 15 PM)
+         ]
+      -}
       , timeZone = Time.utc
       , issue = ""
       , timeInput = ""
