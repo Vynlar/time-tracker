@@ -95,11 +95,10 @@ timeToHours time =
                 hours =
                     modBy 12 <| minutes // 60
             in
-            if hours == 0 then
-                12
-
-            else
-                hours
+                if hours == 0 then
+                    12
+                else
+                    hours
 
 
 timeToMinutes : Time -> Hours
@@ -120,11 +119,10 @@ timeToSegment time =
         hours =
             timeToTotalHours time
     in
-    if hours < 12 then
-        AM
-
-    else
-        PM
+        if hours < 12 then
+            AM
+        else
+            PM
 
 
 makeTime : Hours -> Minutes -> Segment -> Time
@@ -141,11 +139,10 @@ makeTime hours minutes segment =
         realHours =
             if hours == 12 then
                 offset
-
             else
                 hours + offset
     in
-    Time (realHours * 60 + minutes)
+        Time (realHours * 60 + minutes)
 
 
 type Entry
@@ -206,19 +203,17 @@ formValid { timeInput, issue } =
                 Ok _ ->
                     True
     in
-    timeInput /= "" && issue /= "" && timeValid
+        timeInput /= "" && issue /= "" && timeValid
 
 
 init : Flags -> ( Model, Cmd Msg )
 init flags =
     ( { log =
-            [ In (makeTime 9 0 AM) "GBC-10"
+            [ In (makeTime 9 0 AM) "GBC-457"
             , In (makeTime 9 15 AM) "GBC-457"
-            , Out (makeTime 12 5 PM)
-            , In (makeTime 1 0 PM) "GBC-457"
-            , In (makeTime 1 45 PM) "GBC-342"
-            , In (makeTime 5 45 PM) "MD-120"
-            , Out (makeTime 6 5 PM)
+            , In (makeTime 9 10 AM) "GBC-456"
+            , In (makeTime 10 15 AM) "GBC-457"
+            , Out (makeTime 12 15 PM)
             ]
       , timeZone = Time.utc
       , issue = ""
@@ -270,18 +265,18 @@ createEntry issue model =
             model.timeInput
                 |> Parser.run parseTime
     in
-    case timeResult of
-        Ok time ->
-            ( { model
-                | log = In time issue :: model.log
-                , timeInput = ""
-                , issue = ""
-              }
-            , Cmd.none
-            )
+        case timeResult of
+            Ok time ->
+                ( { model
+                    | log = In time issue :: model.log
+                    , timeInput = ""
+                    , issue = ""
+                  }
+                , Cmd.none
+                )
 
-        Err err ->
-            ( model, Task.perform (CreateWithTime issue << posixToTime model.timeZone) Time.now )
+            Err err ->
+                ( model, Task.perform (CreateWithTime issue << posixToTime model.timeZone) Time.now )
 
 
 durationToString : Int -> String
@@ -293,10 +288,10 @@ durationToString duration =
         minutes =
             modBy 60 duration
     in
-    [ ( hours, "h" ), ( minutes, "m" ) ]
-        |> List.filter (\( d, _ ) -> d > 0)
-        |> List.map (\( d, suffix ) -> String.fromInt d ++ suffix)
-        |> String.join " "
+        [ ( hours, "h" ), ( minutes, "m" ) ]
+            |> List.filter (\( d, _ ) -> d > 0)
+            |> List.map (\( d, suffix ) -> String.fromInt d ++ suffix)
+            |> String.join " "
 
 
 addTimes : Time -> Time -> Time
@@ -315,10 +310,9 @@ removeDuplicates list =
 
         x :: y :: xs ->
             if Tuple.first x == Tuple.first y then
-                ( Tuple.first x, Tuple.second x + Tuple.second y ) :: removeDuplicates xs
-
+                removeDuplicates (( Tuple.first x, Tuple.second x + Tuple.second y ) :: xs)
             else
-                x :: y :: removeDuplicates xs
+                x :: removeDuplicates (y :: xs)
 
 
 
@@ -327,38 +321,42 @@ removeDuplicates list =
 
 calculateTotals : Log -> List ( String, Int )
 calculateTotals log =
-    List.map2 (\x y -> ( x, y )) log (List.tail log |> Maybe.withDefault [])
-        |> List.filter
-            (\( first, _ ) ->
-                case first of
-                    In _ _ ->
-                        True
+    let
+        sortedLog =
+            sortLog log
+    in
+        List.map2 (\x y -> ( x, y )) sortedLog (List.tail sortedLog |> Maybe.withDefault [])
+            |> List.filter
+                (\( first, _ ) ->
+                    case first of
+                        In _ _ ->
+                            True
 
-                    Out _ ->
-                        False
-            )
-        |> List.map
-            (\( first, second ) ->
-                let
-                    firstTime =
-                        getTime first
+                        Out _ ->
+                            False
+                )
+            |> List.map
+                (\( first, second ) ->
+                    let
+                        firstTime =
+                            getTime first
 
-                    issue =
-                        getIssue first
-                            |> Maybe.withDefault ""
+                        secondTime =
+                            getTime second
 
-                    secondTime =
-                        getTime second
+                        issue =
+                            getIssue first
+                                |> Maybe.withDefault ""
 
-                    duration =
-                        case ( firstTime, secondTime ) of
-                            ( Time a, Time b ) ->
-                                b - a
-                in
-                ( issue, duration )
-            )
-        |> List.sortBy Tuple.first
-        |> removeDuplicates
+                        duration =
+                            case ( firstTime, secondTime ) of
+                                ( Time a, Time b ) ->
+                                    b - a
+                    in
+                        ( issue, duration )
+                )
+            |> List.sortBy Tuple.first
+            |> removeDuplicates
 
 
 posixToTime : Time.Zone -> Time.Posix -> Time
@@ -370,7 +368,7 @@ posixToTime zone posix =
         minutes =
             Time.toMinute zone posix
     in
-    makeTime hours minutes AM
+        makeTime hours minutes AM
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -512,7 +510,7 @@ renderQuickButton : Issue -> Element Msg
 renderQuickButton issue =
     el [ Background.color blue, Font.color white, Border.rounded 200, Font.size 14 ]
         (Input.button [ padding 8 ]
-            { onPress = Just (CreateEntryWithIssue issue)
+            { onPress = Just (ChangeIssue issue)
             , label = text issue
             }
         )
@@ -549,151 +547,145 @@ view model =
         container =
             if narrow then
                 column
-
             else
                 row
 
         valid =
             formValid { timeInput = model.timeInput, issue = model.issue }
     in
-    { title = "Timetracker"
-    , body =
-        [ Element.layout [ padding 30, Background.color (rgba 0 0 0 0.1) ] <|
-            container
-                [ spacing 30
-                , centerX
-                , centerY
-                , width
-                    (fill
-                        |> maximum
-                            (if narrow then
-                                500
-
-                             else
-                                1000
-                            )
-                    )
-                ]
-                [ column [ alignTop, width (fillPortion 1), spacing 20 ]
-                    [ renderTitle "Log"
-                    , row [ width fill ]
-                        [ Input.text
-                            [ width fill
-                            , height (px 40)
-                            , Font.size 16
-                            , Border.roundEach
-                                { topLeft = 5
-                                , topRight = 0
-                                , bottomLeft = 5
-                                , bottomRight = 0
-                                }
-                            , Border.width 0
-                            , normalShadow 3
-                            , spacing 5
-                            ]
-                            { onChange = ChangeTimeInput
-                            , text = model.timeInput
-                            , placeholder = Just (Input.placeholder [] (text "hh:mm"))
-                            , label =
-                                Input.labelAbove [ Font.size 16 ] (text "Start time")
-                            }
-                        , Input.button
-                            [ Background.color lightBlue
-                            , height (px 40)
-                            , alignBottom
-                            , width (px 70)
-                            , Border.roundEach
-                                { topLeft = 0
-                                , topRight = 5
-                                , bottomLeft = 0
-                                , bottomRight = 5
-                                }
-                            , normalShadow 3
-                            ]
-                            { onPress = Just NowPressed, label = el [ centerX, Font.color blue, Font.size 16 ] (text "Now") }
-                        ]
-                    , column [ spacing 8, width fill ]
-                        [ Input.text
-                            [ width fill
-                            , height (px 40)
-                            , spacing 5
-                            , Font.size 16
-                            , Border.rounded 5
-                            , Border.width 0
-                            , normalShadow 3
-                            ]
-                            { onChange = ChangeIssue
-                            , text = model.issue
-                            , placeholder = Just (Input.placeholder [] (text "ex. GBC-10, standup"))
-                            , label = Input.labelAbove [ Font.size 16 ] (text "Description")
-                            }
-                        , wrappedRow [ spacing 4 ]
-                            (model.log
-                                |> getAllIssues
-                                |> List.map renderQuickButton
-                            )
-                        ]
-                    , Input.button
-                        [ paddingXY 16 12
-                        , Background.color
-                            (if valid then
-                                blue
-
-                             else
-                                rgb255 200 200 200
-                            )
-                        , Font.size 16
-                        , Font.color
-                            (if valid then
-                                white
-
-                             else
-                                rgb255 150 150 150
-                            )
-                        , Border.rounded 5
-                        ]
-                        { onPress =
-                            if valid then
-                                Just CreateEntry
-
-                            else
-                                Nothing
-                        , label = text "Create"
-                        }
-                    ]
-                , column [ alignTop, spacing 10, width (fillPortion 1) ]
-                    ([ renderTitle "Entries" ]
-                        ++ (model.log
-                                |> sortLog
-                                |> List.map (renderEntry model.timeZone)
-                           )
-                    )
-                , column [ alignTop, width (fillPortion 1), spacing 12 ]
-                    ([ renderTitle "Summary" ]
-                        ++ [ column [ width fill, Font.size 16 ]
-                                (List.indexedMap
-                                    (\index ( issue, duration ) ->
-                                        row
-                                            [ width fill
-                                            , paddingXY 8 16
-                                            , Border.rounded 3
-                                            , Background.color
-                                                (if modBy 2 index == 1 then
-                                                    rgba 0 0 0 0
-
-                                                 else
-                                                    rgb255 240 240 240
-                                                )
-                                            ]
-                                            [ text issue, el [ alignRight ] (text <| durationToString duration) ]
-                                    )
-                                    (calculateTotals model.log)
+        { title = "Timetracker"
+        , body =
+            [ Element.layout [ padding 30, Background.color (rgba 0 0 0 0.1) ] <|
+                container
+                    [ spacing 30
+                    , centerX
+                    , centerY
+                    , width
+                        (fill
+                            |> maximum
+                                (if narrow then
+                                    500
+                                 else
+                                    1000
                                 )
-                           ]
-                    )
-                ]
-        ]
-    }
+                        )
+                    ]
+                    [ column [ alignTop, width (fillPortion 1), spacing 20 ]
+                        [ renderTitle "Log"
+                        , row [ width fill ]
+                            [ Input.text
+                                [ width fill
+                                , height (px 40)
+                                , Font.size 16
+                                , Border.roundEach
+                                    { topLeft = 5
+                                    , topRight = 0
+                                    , bottomLeft = 5
+                                    , bottomRight = 0
+                                    }
+                                , Border.width 0
+                                , normalShadow 3
+                                , spacing 5
+                                ]
+                                { onChange = ChangeTimeInput
+                                , text = model.timeInput
+                                , placeholder = Just (Input.placeholder [] (text "hh:mm"))
+                                , label =
+                                    Input.labelAbove [ Font.size 16 ] (text "Start time")
+                                }
+                            , Input.button
+                                [ Background.color lightBlue
+                                , height (px 40)
+                                , alignBottom
+                                , width (px 70)
+                                , Border.roundEach
+                                    { topLeft = 0
+                                    , topRight = 5
+                                    , bottomLeft = 0
+                                    , bottomRight = 5
+                                    }
+                                , normalShadow 3
+                                ]
+                                { onPress = Just NowPressed, label = el [ centerX, Font.color blue, Font.size 16 ] (text "Now") }
+                            ]
+                        , column [ spacing 8, width fill ]
+                            [ Input.text
+                                [ width fill
+                                , height (px 40)
+                                , spacing 5
+                                , Font.size 16
+                                , Border.rounded 5
+                                , Border.width 0
+                                , normalShadow 3
+                                ]
+                                { onChange = ChangeIssue
+                                , text = model.issue
+                                , placeholder = Just (Input.placeholder [] (text "ex. GBC-10, standup"))
+                                , label = Input.labelAbove [ Font.size 16 ] (text "Description")
+                                }
+                            , wrappedRow [ spacing 4 ]
+                                (model.log
+                                    |> getAllIssues
+                                    |> List.map renderQuickButton
+                                )
+                            ]
+                        , Input.button
+                            [ paddingXY 16 12
+                            , Background.color
+                                (if valid then
+                                    blue
+                                 else
+                                    rgb255 200 200 200
+                                )
+                            , Font.size 16
+                            , Font.color
+                                (if valid then
+                                    white
+                                 else
+                                    rgb255 150 150 150
+                                )
+                            , Border.rounded 5
+                            ]
+                            { onPress =
+                                if valid then
+                                    Just CreateEntry
+                                else
+                                    Nothing
+                            , label = text "Create"
+                            }
+                        ]
+                    , column [ alignTop, spacing 10, width (fillPortion 1) ]
+                        ([ renderTitle "Entries" ]
+                            ++ (model.log
+                                    |> sortLog
+                                    |> List.map (renderEntry model.timeZone)
+                               )
+                        )
+                    , column [ alignTop, width (fillPortion 1), spacing 12 ]
+                        ([ renderTitle "Summary" ]
+                            ++ [ column [ width fill, Font.size 16 ]
+                                    (List.indexedMap
+                                        (\index ( issue, duration ) ->
+                                            row
+                                                [ width fill
+                                                , paddingXY 8 16
+                                                , Border.rounded 3
+                                                , Background.color
+                                                    (if modBy 2 index == 1 then
+                                                        rgba 0 0 0 0
+                                                     else
+                                                        rgb255 240 240 240
+                                                    )
+                                                ]
+                                                [ text issue, el [ alignRight ] (text <| durationToString duration) ]
+                                        )
+                                        (calculateTotals model.log)
+                                    )
+                               ]
+                        )
+                    ]
+            ]
+        }
 
 
 subscriptions : Model -> Sub Msg
