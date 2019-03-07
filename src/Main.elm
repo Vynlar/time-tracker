@@ -20,7 +20,9 @@ import Element
         , fill
         , fillPortion
         , height
+        , inFront
         , maximum
+        , mouseOver
         , padding
         , paddingXY
         , paragraph
@@ -149,29 +151,43 @@ makeTime hours minutes segment =
     Time (realHours * 60 + minutes)
 
 
+type alias Id =
+    Int
+
+
 type Entry
-    = In Time Issue
-    | Out Time
+    = In Id Time Issue
+    | Out Id Time
 
 
 getIssue : Entry -> Maybe Issue
 getIssue entry =
     case entry of
-        In _ issue ->
+        In _ _ issue ->
             Just issue
 
-        Out _ ->
+        Out _ _ ->
             Nothing
 
 
 getTime : Entry -> Time
 getTime entry =
     case entry of
-        In time _ ->
+        In _ time _ ->
             time
 
-        Out time ->
+        Out _ time ->
             time
+
+
+getId : Entry -> Id
+getId entry =
+    case entry of
+        In id _ _ ->
+            id
+
+        Out id _ ->
+            id
 
 
 type alias Log =
@@ -186,6 +202,7 @@ type alias Model =
     , width : Int
     , height : Int
     , currentTime : Time.Posix
+    , nextId : Int
     }
 
 
@@ -230,10 +247,12 @@ init flags =
       , width = 1280
       , height = 720
       , currentTime = Time.millisToPosix 0
+      , nextId = 0
       }
     , Cmd.batch
         [ Task.perform SetTimezone Time.here
         , Task.perform (\viewport -> WindowResize (round viewport.viewport.width) (round viewport.viewport.height)) Browser.Dom.getViewport
+        , Task.perform CurrentTime Time.now
         ]
     )
 
@@ -249,6 +268,7 @@ type Msg
     | ChangeTimeInput String
     | NowPressed
     | CurrentTime Time.Posix
+    | DeleteEntry Id
 
 
 sortLog : Log -> Log
@@ -283,20 +303,26 @@ timeIntParser =
            )
 
 
+parseSegment : Parser Segment
+parseSegment =
+    Parser.oneOf
+        [ Parser.map (\_ -> AM) (Parser.keyword "AM")
+        , Parser.map (\_ -> PM) (Parser.keyword "PM")
+        , Parser.map (\_ -> AM) (Parser.keyword "A")
+        , Parser.map (\_ -> PM) (Parser.keyword "P")
+        , Parser.map (\_ -> AM) (Parser.succeed ())
+        ]
+
+
 parseTime : Parser Time
 parseTime =
     Parser.succeed makeTime
+        |. Parser.spaces
         |= timeIntParser
         |. Parser.symbol ":"
         |= timeIntParser
         |. Parser.spaces
-        |= Parser.oneOf
-            [ Parser.map (\_ -> AM) (Parser.keyword "AM")
-            , Parser.map (\_ -> PM) (Parser.keyword "PM")
-            , Parser.map (\_ -> AM) (Parser.keyword "A")
-            , Parser.map (\_ -> PM) (Parser.keyword "P")
-            , Parser.map (\_ -> AM) (Parser.succeed ())
-            ]
+        |= parseSegment
 
 
 createEntry : Issue -> Model -> ( Model, Cmd Msg )
@@ -309,9 +335,10 @@ createEntry issue model =
     case timeResult of
         Ok time ->
             ( { model
-                | log = In time issue :: model.log
+                | log = In model.nextId time issue :: model.log
                 , timeInput = ""
                 , issue = ""
+                , nextId = model.nextId + 1
               }
             , Cmd.none
             )
@@ -365,7 +392,7 @@ calculateTotals : Time.Zone -> Time.Posix -> Log -> List ( String, Int )
 calculateTotals zone currentTime log =
     let
         currentTimeOutEntry =
-            Out (posixToTime zone currentTime)
+            Out 0 (posixToTime zone currentTime)
 
         sortedLog =
             sortLog (currentTimeOutEntry :: log)
@@ -374,10 +401,10 @@ calculateTotals zone currentTime log =
         |> List.filter
             (\( first, _ ) ->
                 case first of
-                    In _ _ ->
+                    In _ _ _ ->
                         True
 
-                    Out _ ->
+                    Out _ _ ->
                         False
             )
         |> List.map
@@ -439,8 +466,9 @@ update msg model =
 
         CreateWithTime issue time ->
             ( { model
-                | log = In time issue :: model.log
+                | log = In model.nextId time issue :: model.log
                 , issue = ""
+                , nextId = model.nextId + 1
               }
             , Cmd.none
             )
@@ -453,6 +481,9 @@ update msg model =
 
         CurrentTime time ->
             ( { model | currentTime = time }, Cmd.none )
+
+        DeleteEntry id ->
+            ( { model | log = List.filter (\entry -> getId entry /= id) model.log }, Cmd.none )
 
 
 segmentToString : Segment -> String
@@ -492,36 +523,50 @@ normalShadow size =
 
 renderEntry : Time.Zone -> Entry -> Element Msg
 renderEntry zone entry =
-    case getIssue entry of
-        Nothing ->
-            row
-                [ paddingXY 15 10
-                , Font.size 16
-                , width fill
-                ]
-                [ el
-                    [ alignRight
-                    , Font.color (rgba 0 0 0 0.5)
-                    ]
-                    (text <| timeToString (getTime entry))
-                ]
+    Input.button [ width fill ]
+        { label =
+            case getIssue entry of
+                Nothing ->
+                    row
+                        [ paddingXY 15 10
+                        , Font.size 16
+                        , width fill
+                        , mouseOver
+                            [ Font.color (rgb255 200 0 0)
+                            ]
+                        ]
+                        [ el
+                            [ alignRight
+                            , Font.color (rgba 0 0 0 0.5)
+                            , spacing 5
+                            ]
+                            (text <| timeToString (getTime entry))
+                        ]
 
-        Just issue ->
-            row
-                [ padding 15
-                , normalShadow 3
-                , Border.rounded 5
-                , Font.size 16
-                , width fill
-                , Background.color (rgba 1 1 1 1)
-                ]
-                [ text (Maybe.withDefault "Out" <| getIssue entry)
-                , el
-                    [ alignRight
-                    , Font.color (rgba 0 0 0 0.5)
-                    ]
-                    (text <| timeToString (getTime entry))
-                ]
+                Just issue ->
+                    row
+                        [ padding 15
+                        , normalShadow 3
+                        , Border.rounded 5
+                        , Font.size 16
+                        , width fill
+                        , Background.color (rgba 1 1 1 1)
+                        , Border.width 2
+                        , Border.color (rgba 0 0 0 0)
+                        , mouseOver
+                            [ Border.color (rgb255 200 0 0)
+                            ]
+                        ]
+                        [ text (Maybe.withDefault "Out" <| getIssue entry)
+                        , el
+                            [ alignRight
+                            , Font.color (rgba 0 0 0 0.5)
+                            , spacing 5
+                            ]
+                            (text <| timeToString (getTime entry))
+                        ]
+        , onPress = Just (DeleteEntry (getId entry))
+        }
 
 
 getAllIssues : Log -> List Issue
