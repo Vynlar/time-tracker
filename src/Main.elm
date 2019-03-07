@@ -267,20 +267,28 @@ parseInt string =
                 string
     in
     case String.toInt fixedString of
-        Ok int ->
+        Just int ->
             Parser.succeed int
 
-        Err _ ->
+        Nothing ->
             Parser.problem "Time is not a number"
+
+
+timeIntParser : Parser Int
+timeIntParser =
+    Parser.succeed identity
+        |. Parser.chompWhile (\c -> c == '0')
+        |= (Parser.getChompedString (Parser.chompWhile Char.isDigit)
+                |> Parser.andThen parseInt
+           )
 
 
 parseTime : Parser Time
 parseTime =
     Parser.succeed makeTime
-        |= (Parser.getChompedString (Parser.chompWhile Char.isDigit) |> Parser.andThen parseInt)
+        |= timeIntParser
         |. Parser.symbol ":"
-        |. Parser.chompWhile (\char -> char == '0')
-        |= Parser.int
+        |= timeIntParser
         |. Parser.spaces
         |= Parser.oneOf
             [ Parser.map (\_ -> AM) (Parser.keyword "AM")
