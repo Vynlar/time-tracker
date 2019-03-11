@@ -43,6 +43,7 @@ import Element.Input as Input
 import Html exposing (Html, div, input)
 import Html.Attributes exposing (placeholder, value)
 import Html.Events exposing (onClick, onInput)
+import Http
 import List
 import Maybe
 import Parser exposing ((|.), (|=), Parser)
@@ -206,14 +207,14 @@ type alias Model =
     , nextId : Int
     , simpleInOutAppId : String
     , simpleInOutSecret : String
-    , oAuthCode : String
+    , oAuthCode : Maybe String
     }
 
 
 type alias Flags =
     { simpleInOutAppId : String
     , simpleInOutSecret : String
-    , oAuthCode : String
+    , oAuthCode : Maybe String
     }
 
 
@@ -233,6 +234,24 @@ formValid { timeInput, issue } =
                     True
     in
     timeInput /= "" && issue /= "" && timeValid
+
+
+get : String -> String -> Http.Expect Msg -> Cmd Msg
+get =
+    request "GET"
+
+
+request : String -> String -> String -> Http.Expect Msg -> Cmd Msg
+request method token path expect =
+    Http.request
+        { method = method
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = "https://simpleinout.com/" ++ path
+        , body = Http.emptyBody
+        , expect = expect
+        , timeout = Nothing
+        , tracker = Nothing
+        }
 
 
 init : Flags -> ( Model, Cmd Msg )
