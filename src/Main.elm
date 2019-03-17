@@ -44,6 +44,8 @@ import Html exposing (Html, div, input)
 import Html.Attributes exposing (placeholder, value)
 import Html.Events exposing (onClick, onInput)
 import Http
+import Json.Decode as Decode exposing (Decoder)
+import Json.Encode as Encode
 import List
 import Maybe
 import Parser exposing ((|.), (|=), Parser)
@@ -206,14 +208,13 @@ type alias Model =
     , currentTime : Time.Posix
     , nextId : Int
     , simpleInOutAppId : String
-    , simpleInOutSecret : String
     , oAuthCode : Maybe String
+    , token : Maybe String
     }
 
 
 type alias Flags =
     { simpleInOutAppId : String
-    , simpleInOutSecret : String
     , oAuthCode : Maybe String
     }
 
@@ -254,8 +255,36 @@ request method token path expect =
         }
 
 
+decodeToken : Decoder String
+decodeToken =
+    Decode.field "token" Decode.string
+
+
+tokenRequest : String -> Cmd Msg
+tokenRequest code =
+    Http.post
+        { url = "/api/simpleinout/oauth/token"
+        , expect = Http.expectJson TokenSuccess decodeToken
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "code", Encode.string code )
+                    ]
+                )
+        }
+
+
 init : Flags -> ( Model, Cmd Msg )
 init flags =
+    let
+        tokenCmd =
+            case flags.oAuthCode of
+                Nothing ->
+                    []
+
+                Just code ->
+                    [ tokenRequest code ]
+    in
     ( { log =
             []
 
@@ -275,14 +304,16 @@ init flags =
       , currentTime = Time.millisToPosix 0
       , nextId = 0
       , simpleInOutAppId = flags.simpleInOutAppId
-      , simpleInOutSecret = flags.simpleInOutSecret
       , oAuthCode = flags.oAuthCode
+      , token = Nothing
       }
     , Cmd.batch
-        [ Task.perform SetTimezone Time.here
-        , Task.perform (\viewport -> WindowResize (round viewport.viewport.width) (round viewport.viewport.height)) Browser.Dom.getViewport
-        , Task.perform CurrentTime Time.now
-        ]
+        ([ Task.perform SetTimezone Time.here
+         , Task.perform (\viewport -> WindowResize (round viewport.viewport.width) (round viewport.viewport.height)) Browser.Dom.getViewport
+         , Task.perform CurrentTime Time.now
+         ]
+            ++ tokenCmd
+        )
     )
 
 
@@ -298,6 +329,7 @@ type Msg
     | NowPressed
     | CurrentTime Time.Posix
     | DeleteEntry Id
+    | TokenSuccess (Result Http.Error String)
 
 
 sortLog : Log -> Log
@@ -513,6 +545,12 @@ update msg model =
 
         DeleteEntry id ->
             ( { model | log = List.filter (\entry -> getId entry /= id) model.log }, Cmd.none )
+
+        TokenSuccess (Ok token) ->
+            ( { model | token = Just token }, Cmd.none )
+
+        TokenSuccess (Err error) ->
+            ( model, Cmd.none )
 
 
 segmentToString : Segment -> String
