@@ -1,5 +1,6 @@
 module Main exposing (main)
 
+import BasicTime exposing (Time)
 import Browser exposing (Document)
 import Browser.Dom
 import Browser.Events
@@ -20,13 +21,11 @@ import Element
         , fill
         , fillPortion
         , height
-        , inFront
         , link
         , maximum
         , mouseOver
         , padding
         , paddingXY
-        , paragraph
         , px
         , rgb255
         , rgba
@@ -40,21 +39,21 @@ import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
 import Element.Input as Input
-import Html exposing (Html, div, input)
-import Html.Attributes exposing (placeholder, value)
-import Html.Events exposing (onClick, onInput)
+import Entry exposing (Entry)
+import Html.Attributes exposing (placeholder)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
 import List
 import Maybe
-import Parser exposing ((|.), (|=), Parser)
+import Parser
 import Set
 import Task
 import Time
 import Tuple
 
 
+main : Program Flags Model Msg
 main =
     Browser.document
         { update = update
@@ -64,158 +63,30 @@ main =
         }
 
 
-type alias Issue =
-    String
-
-
-type alias Minutes =
-    Int
-
-
-type alias Hours =
-    Int
-
-
-type Time
-    = Time Minutes
-
-
-timeToTotalMinutes : Time -> Minutes
-timeToTotalMinutes time =
-    case time of
-        Time minutes ->
-            minutes
-
-
-timeToTotalHours : Time -> Hours
-timeToTotalHours time =
-    case time of
-        Time minutes ->
-            minutes // 60
-
-
-timeToHours : Time -> Hours
-timeToHours time =
-    case time of
-        Time minutes ->
-            let
-                hours =
-                    modBy 12 <| minutes // 60
-            in
-            if hours == 0 then
-                12
-
-            else
-                hours
-
-
-timeToMinutes : Time -> Hours
-timeToMinutes time =
-    case time of
-        Time minutes ->
-            modBy 60 minutes
-
-
-type Segment
-    = AM
-    | PM
-
-
-timeToSegment : Time -> Segment
-timeToSegment time =
-    let
-        hours =
-            timeToTotalHours time
-    in
-    if hours < 12 then
-        AM
-
-    else
-        PM
-
-
-makeTime : Hours -> Minutes -> Segment -> Time
-makeTime hours minutes segment =
-    let
-        offset =
-            case segment of
-                AM ->
-                    0
-
-                PM ->
-                    12
-
-        realHours =
-            if hours == 12 then
-                offset
-
-            else
-                hours + offset
-    in
-    Time (realHours * 60 + minutes)
-
-
-type alias Id =
-    Int
-
-
-type Entry
-    = In Id Time Issue
-    | Out Id Time
-
-
-getIssue : Entry -> Maybe Issue
-getIssue entry =
-    case entry of
-        In _ _ issue ->
-            Just issue
-
-        Out _ _ ->
-            Nothing
-
-
-getTime : Entry -> Time
-getTime entry =
-    case entry of
-        In _ time _ ->
-            time
-
-        Out _ time ->
-            time
-
-
-getId : Entry -> Id
-getId entry =
-    case entry of
-        In id _ _ ->
-            id
-
-        Out id _ ->
-            id
-
-
-type alias Log =
-    List Entry
+type AuthStatus
+    = LoggedOut
+    | HasCode String
+    | HasToken String
 
 
 type alias Model =
-    { log : Log
+    { log : List Entry
     , timeZone : Time.Zone
-    , issue : Issue
+    , issue : String
     , timeInput : String
     , width : Int
     , height : Int
     , currentTime : Time.Posix
     , nextId : Int
     , simpleInOutAppId : String
-    , oAuthCode : Maybe String
-    , token : Maybe String
+    , authStatus : AuthStatus
     }
 
 
 type alias Flags =
     { simpleInOutAppId : String
     , oAuthCode : Maybe String
+    , token : Maybe String
     }
 
 
@@ -224,7 +95,7 @@ formValid { timeInput, issue } =
     let
         timeResult =
             timeInput
-                |> Parser.run parseTime
+                |> Parser.run BasicTime.parser
 
         timeValid =
             case timeResult of
@@ -235,11 +106,6 @@ formValid { timeInput, issue } =
                     True
     in
     timeInput /= "" && issue /= "" && timeValid
-
-
-get : String -> String -> Http.Expect Msg -> Cmd Msg
-get =
-    request "GET"
 
 
 request : String -> String -> String -> Http.Expect Msg -> Cmd Msg
@@ -284,6 +150,17 @@ init flags =
 
                 Just code ->
                     [ tokenRequest code ]
+
+        authStatus =
+            case ( flags.token, flags.oAuthCode ) of
+                ( Just token, _ ) ->
+                    HasToken token
+
+                ( Nothing, Just code ) ->
+                    HasCode code
+
+                _ ->
+                    LoggedOut
     in
     ( { log =
             []
@@ -304,8 +181,7 @@ init flags =
       , currentTime = Time.millisToPosix 0
       , nextId = 0
       , simpleInOutAppId = flags.simpleInOutAppId
-      , oAuthCode = flags.oAuthCode
-      , token = Nothing
+      , authStatus = authStatus
       }
     , Cmd.batch
         ([ Task.perform SetTimezone Time.here
@@ -318,85 +194,34 @@ init flags =
 
 
 type Msg
-    = NoOp
-    | SetTimezone Time.Zone
+    = SetTimezone Time.Zone
     | CreateEntry
-    | CreateEntryWithIssue Issue
-    | CreateWithTime Issue Time
+    | CreateWithTime String Time
     | ChangeIssue String
     | WindowResize Int Int
     | ChangeTimeInput String
     | NowPressed
     | CurrentTime Time.Posix
-    | DeleteEntry Id
+    | DeleteEntry Int
     | TokenSuccess (Result Http.Error String)
 
 
-sortLog : Log -> Log
+sortLog : List Entry -> List Entry
 sortLog log =
-    List.sortBy (timeToTotalMinutes << getTime) log
+    List.sortBy (BasicTime.toTotalMinutes << Entry.getTime) log
 
 
-parseInt : String -> Parser Int
-parseInt string =
-    let
-        fixedString =
-            if string == "" then
-                "0"
-
-            else
-                string
-    in
-    case String.toInt fixedString of
-        Just int ->
-            Parser.succeed int
-
-        Nothing ->
-            Parser.problem "Time is not a number"
-
-
-timeIntParser : Parser Int
-timeIntParser =
-    Parser.succeed identity
-        |. Parser.chompWhile (\c -> c == '0')
-        |= (Parser.getChompedString (Parser.chompWhile Char.isDigit)
-                |> Parser.andThen parseInt
-           )
-
-
-parseSegment : Parser Segment
-parseSegment =
-    Parser.oneOf
-        [ Parser.map (\_ -> AM) (Parser.keyword "AM")
-        , Parser.map (\_ -> PM) (Parser.keyword "PM")
-        , Parser.map (\_ -> AM) (Parser.keyword "A")
-        , Parser.map (\_ -> PM) (Parser.keyword "P")
-        , Parser.map (\_ -> AM) (Parser.succeed ())
-        ]
-
-
-parseTime : Parser Time
-parseTime =
-    Parser.succeed makeTime
-        |. Parser.spaces
-        |= timeIntParser
-        |. Parser.symbol ":"
-        |= timeIntParser
-        |. Parser.spaces
-        |= parseSegment
-
-
-createEntry : Issue -> Model -> ( Model, Cmd Msg )
+createEntry : String -> Model -> ( Model, Cmd Msg )
 createEntry issue model =
     let
         timeResult =
             model.timeInput
-                |> Parser.run parseTime
+                |> Parser.run BasicTime.parser
     in
     case timeResult of
         Ok time ->
             ( { model
-                | log = In model.nextId time issue :: model.log
+                | log = Entry.newIn model.nextId time issue :: model.log
                 , timeInput = ""
                 , issue = ""
                 , nextId = model.nextId + 1
@@ -404,7 +229,7 @@ createEntry issue model =
             , Cmd.none
             )
 
-        Err err ->
+        Err _ ->
             ( model, Task.perform (CreateWithTime issue << posixToTime model.timeZone) Time.now )
 
 
@@ -421,11 +246,6 @@ durationToString duration =
         |> List.filter (\( d, _ ) -> d > 0)
         |> List.map (\( d, suffix ) -> String.fromInt d ++ suffix)
         |> String.join " "
-
-
-addTimes : Time -> Time -> Time
-addTimes (Time a) (Time b) =
-    Time (a + b)
 
 
 removeDuplicates : List ( String, Int ) -> List ( String, Int )
@@ -445,15 +265,11 @@ removeDuplicates list =
                 x :: removeDuplicates (y :: xs)
 
 
-
--- TODO: add the current time to the end of the log always to determine the duration of the very last issue
-
-
-calculateTotals : Time.Zone -> Time.Posix -> Log -> List ( String, Int )
+calculateTotals : Time.Zone -> Time.Posix -> List Entry -> List ( String, Int )
 calculateTotals zone currentTime log =
     let
         currentTimeOutEntry =
-            Out 0 (posixToTime zone currentTime)
+            Entry.newOut 0 (posixToTime zone currentTime)
 
         sortedLog =
             sortLog (currentTimeOutEntry :: log)
@@ -461,30 +277,24 @@ calculateTotals zone currentTime log =
     List.map2 (\x y -> ( x, y )) sortedLog (List.tail sortedLog |> Maybe.withDefault [])
         |> List.filter
             (\( first, _ ) ->
-                case first of
-                    In _ _ _ ->
-                        True
-
-                    Out _ _ ->
-                        False
+                Entry.isIn first
             )
         |> List.map
             (\( first, second ) ->
                 let
                     firstTime =
-                        getTime first
+                        Entry.getTime first
 
                     secondTime =
-                        getTime second
+                        Entry.getTime second
 
                     issue =
-                        getIssue first
+                        Entry.getText first
                             |> Maybe.withDefault ""
 
                     duration =
-                        case ( firstTime, secondTime ) of
-                            ( Time a, Time b ) ->
-                                b - a
+                        BasicTime.duration firstTime secondTime
+                            |> BasicTime.toTotalMinutes
                 in
                 ( issue, duration )
             )
@@ -501,15 +311,12 @@ posixToTime zone posix =
         minutes =
             Time.toMinute zone posix
     in
-    makeTime hours minutes AM
+    BasicTime.new hours minutes BasicTime.am
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        NoOp ->
-            ( model, Cmd.none )
-
         WindowResize width height ->
             ( { model | width = width, height = height }, Cmd.none )
 
@@ -527,55 +334,27 @@ update msg model =
 
         CreateWithTime issue time ->
             ( { model
-                | log = In model.nextId time issue :: model.log
+                | log = Entry.newIn model.nextId time issue :: model.log
                 , issue = ""
                 , nextId = model.nextId + 1
               }
             , Cmd.none
             )
 
-        CreateEntryWithIssue issue ->
-            createEntry issue model
-
         NowPressed ->
-            ( model, Task.perform (\posix -> ChangeTimeInput ((timeToString << posixToTime model.timeZone) posix)) Time.now )
+            ( model, Task.perform (\posix -> ChangeTimeInput ((BasicTime.toString << posixToTime model.timeZone) posix)) Time.now )
 
         CurrentTime time ->
             ( { model | currentTime = time }, Cmd.none )
 
         DeleteEntry id ->
-            ( { model | log = List.filter (\entry -> getId entry /= id) model.log }, Cmd.none )
+            ( { model | log = List.filter (\entry -> Entry.getId entry /= id) model.log }, Cmd.none )
 
         TokenSuccess (Ok token) ->
-            ( { model | token = Just token }, Cmd.none )
+            ( { model | authStatus = HasToken token }, Cmd.none )
 
-        TokenSuccess (Err error) ->
-            ( model, Cmd.none )
-
-
-segmentToString : Segment -> String
-segmentToString segment =
-    case segment of
-        AM ->
-            "AM"
-
-        PM ->
-            "PM"
-
-
-timeToString : Time -> String
-timeToString time =
-    String.fromInt (timeToHours time)
-        ++ ":"
-        ++ (timeToMinutes time
-                |> String.fromInt
-                |> String.padLeft 2 '0'
-           )
-        ++ " "
-        ++ (time
-                |> timeToSegment
-                |> segmentToString
-           )
+        TokenSuccess (Err _) ->
+            ( { model | authStatus = LoggedOut }, Cmd.none )
 
 
 normalShadow : Float -> Attr decorative Msg
@@ -588,11 +367,11 @@ normalShadow size =
         }
 
 
-renderEntry : Time.Zone -> Entry -> Element Msg
-renderEntry zone entry =
+renderEntry : Entry -> Element Msg
+renderEntry entry =
     Input.button [ width fill ]
         { label =
-            case getIssue entry of
+            case Entry.getText entry of
                 Nothing ->
                     row
                         [ paddingXY 15 10
@@ -607,10 +386,10 @@ renderEntry zone entry =
                             , Font.color (rgba 0 0 0 0.5)
                             , spacing 5
                             ]
-                            (text <| timeToString (getTime entry))
+                            (text <| BasicTime.toString (Entry.getTime entry))
                         ]
 
-                Just issue ->
+                Just _ ->
                     row
                         [ padding 15
                         , normalShadow 3
@@ -624,22 +403,22 @@ renderEntry zone entry =
                             [ Border.color (rgb255 200 0 0)
                             ]
                         ]
-                        [ text (Maybe.withDefault "Out" <| getIssue entry)
+                        [ text (Maybe.withDefault "Out" <| Entry.getText entry)
                         , el
                             [ alignRight
                             , Font.color (rgba 0 0 0 0.5)
                             , spacing 5
                             ]
-                            (text <| timeToString (getTime entry))
+                            (text <| BasicTime.toString (Entry.getTime entry))
                         ]
-        , onPress = Just (DeleteEntry (getId entry))
+        , onPress = Just (DeleteEntry (Entry.getId entry))
         }
 
 
-getAllIssues : Log -> List Issue
+getAllIssues : List Entry -> List String
 getAllIssues log =
     log
-        |> List.map getIssue
+        |> List.map Entry.getText
         |> List.filter
             (\x ->
                 case x of
@@ -654,19 +433,22 @@ getAllIssues log =
         |> Set.toList
 
 
+lightBlue : Element.Color
 lightBlue =
     rgb255 228 241 255
 
 
+blue : Element.Color
 blue =
     rgb255 51 140 229
 
 
+white : Element.Color
 white =
     rgb255 255 255 255
 
 
-renderQuickButton : Issue -> Element Msg
+renderQuickButton : String -> Element Msg
 renderQuickButton issue =
     el [ Background.color blue, Font.color white, Border.rounded 200, Font.size 14 ]
         (Input.button [ padding 8 ]
@@ -835,10 +617,10 @@ view model =
                         []
 
                      else
-                        [ renderTitle "Entries" ]
-                            ++ (model.log
+                        renderTitle "Entries"
+                            :: (model.log
                                     |> sortLog
-                                    |> List.map (renderEntry model.timeZone)
+                                    |> List.map renderEntry
                                )
                             ++ [ row
                                     [ paddingXY 15 10
@@ -849,7 +631,7 @@ view model =
                                         [ alignRight
                                         , Font.color (rgba 0 0 0 0.5)
                                         ]
-                                        (text <| "Now " ++ (timeToString << posixToTime model.timeZone) model.currentTime)
+                                        (text <| "Now " ++ (BasicTime.toString << posixToTime model.timeZone) model.currentTime)
                                     ]
                                ]
                     )
@@ -858,27 +640,27 @@ view model =
                         []
 
                      else
-                        [ renderTitle "Summary" ]
-                            ++ [ column [ width fill, Font.size 16 ]
-                                    (List.indexedMap
-                                        (\index ( issue, duration ) ->
-                                            row
-                                                [ width fill
-                                                , paddingXY 8 16
-                                                , Border.rounded 3
-                                                , Background.color
-                                                    (if modBy 2 index == 1 then
-                                                        rgba 0 0 0 0
+                        [ renderTitle "Summary"
+                        , column [ width fill, Font.size 16 ]
+                            (List.indexedMap
+                                (\index ( issue, duration ) ->
+                                    row
+                                        [ width fill
+                                        , paddingXY 8 16
+                                        , Border.rounded 3
+                                        , Background.color
+                                            (if modBy 2 index == 1 then
+                                                rgba 0 0 0 0
 
-                                                     else
-                                                        rgb255 240 240 240
-                                                    )
-                                                ]
-                                                [ text issue, el [ alignRight ] (text <| durationToString duration) ]
-                                        )
-                                        (calculateTotals model.timeZone model.currentTime model.log)
-                                    )
-                               ]
+                                             else
+                                                rgb255 240 240 240
+                                            )
+                                        ]
+                                        [ text issue, el [ alignRight ] (text <| durationToString duration) ]
+                                )
+                                (calculateTotals model.timeZone model.currentTime model.log)
+                            )
+                        ]
                     )
                 ]
         ]
@@ -886,7 +668,7 @@ view model =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions model =
+subscriptions _ =
     Sub.batch
         [ Browser.Events.onResize WindowResize
         , Time.every 1000 CurrentTime
