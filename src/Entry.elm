@@ -34,6 +34,8 @@ getText entry =
             Nothing
 
 
+{-| Extract a `Time` value from an `Entry`. Use the `BasicTime` module to work with the resulting `Time`.
+-}
 getTime : Entry -> Time
 getTime entry =
     case entry of

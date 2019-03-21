@@ -48,6 +48,7 @@ import List
 import Maybe
 import Parser
 import Set
+import Storage
 import Task
 import Time
 import Tuple
@@ -144,12 +145,12 @@ init : Flags -> ( Model, Cmd Msg )
 init flags =
     let
         tokenCmd =
-            case flags.oAuthCode of
-                Nothing ->
-                    []
-
-                Just code ->
+            case ( flags.oAuthCode, flags.token ) of
+                ( Just code, Nothing ) ->
                     [ tokenRequest code ]
+
+                _ ->
+                    []
 
         authStatus =
             case ( flags.token, flags.oAuthCode ) of
@@ -351,7 +352,7 @@ update msg model =
             ( { model | log = List.filter (\entry -> Entry.getId entry /= id) model.log }, Cmd.none )
 
         TokenSuccess (Ok token) ->
-            ( { model | authStatus = HasToken token }, Cmd.none )
+            ( { model | authStatus = HasToken token }, Storage.setToken token )
 
         TokenSuccess (Err _) ->
             ( { model | authStatus = LoggedOut }, Cmd.none )
@@ -523,10 +524,18 @@ view model =
                 ]
                 [ column [ alignTop, width (fillPortion 1), spacing 20 ]
                     [ renderTitle "Log time"
-                    , link []
-                        { url = simpleInOutAuthorizeLink model.simpleInOutAppId
-                        , label = text "Log in"
-                        }
+                    , case model.authStatus of
+                        LoggedOut ->
+                            link []
+                                { url = simpleInOutAuthorizeLink model.simpleInOutAppId
+                                , label = text "Log in"
+                                }
+
+                        HasCode _ ->
+                            Element.none
+
+                        HasToken _ ->
+                            Element.none
                     , row [ width fill ]
                         [ Input.text
                             [ width fill
