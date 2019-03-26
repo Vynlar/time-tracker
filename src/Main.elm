@@ -1,5 +1,6 @@
 module Main exposing (main)
 
+import Api
 import BasicTime exposing (Time)
 import Browser exposing (Document)
 import Browser.Dom
@@ -42,10 +43,6 @@ import Element.Input as Input
 import Entry exposing (Entry)
 import Html.Attributes exposing (placeholder)
 import Http
-import Json.Decode as Decode exposing (Decoder)
-import Json.Encode as Encode
-import List
-import Maybe
 import Parser
 import Set
 import Storage
@@ -109,45 +106,13 @@ formValid { timeInput, issue } =
     timeInput /= "" && issue /= "" && timeValid
 
 
-request : String -> String -> String -> Http.Expect Msg -> Cmd Msg
-request method token path expect =
-    Http.request
-        { method = method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = "https://simpleinout.com/" ++ path
-        , body = Http.emptyBody
-        , expect = expect
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-decodeToken : Decoder String
-decodeToken =
-    Decode.field "token" Decode.string
-
-
-tokenRequest : String -> Cmd Msg
-tokenRequest code =
-    Http.post
-        { url = "/api/simpleinout/oauth/token"
-        , expect = Http.expectJson TokenSuccess decodeToken
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "code", Encode.string code )
-                    ]
-                )
-        }
-
-
 init : Flags -> ( Model, Cmd Msg )
 init flags =
     let
         tokenCmd =
             case ( flags.oAuthCode, flags.token ) of
                 ( Just code, Nothing ) ->
-                    [ tokenRequest code ]
+                    [ Api.getToken code TokenSuccess ]
 
                 _ ->
                     []
@@ -163,17 +128,7 @@ init flags =
                 _ ->
                     LoggedOut
     in
-    ( { log =
-            []
-
-      {-
-         [ In (makeTime 9 0 AM) "GBC-457"
-         , In (makeTime 9 15 AM) "GBC-457"
-         , In (makeTime 9 10 AM) "GBC-456"
-         , In (makeTime 10 15 AM) "GBC-457"
-         , Out (makeTime 12 15 PM)
-         ]
-      -}
+    ( { log = []
       , timeZone = Time.utc
       , issue = ""
       , timeInput = ""
@@ -205,6 +160,8 @@ type Msg
     | CurrentTime Time.Posix
     | DeleteEntry Int
     | TokenSuccess (Result Http.Error String)
+    | LoadStatuses
+    | GotStatuses (Result Http.Error (List Entry))
 
 
 sortLog : List Entry -> List Entry
@@ -356,6 +313,23 @@ update msg model =
 
         TokenSuccess (Err _) ->
             ( { model | authStatus = LoggedOut }, Cmd.none )
+
+        LoadStatuses ->
+            case model.authStatus of
+                LoggedOut ->
+                    ( model, Cmd.none )
+
+                HasCode _ ->
+                    ( model, Cmd.none )
+
+                HasToken token ->
+                    ( model, Api.getStatuses token GotStatuses )
+
+        GotStatuses (Err error) ->
+            Debug.todo "handle the error"
+
+        GotStatuses (Ok statuses) ->
+            Debug.todo "actually do something with the statuses"
 
 
 normalShadow : Float -> Attr decorative Msg
@@ -535,7 +509,10 @@ view model =
                             Element.none
 
                         HasToken _ ->
-                            Element.none
+                            Input.button []
+                                { onPress = Just LoadStatuses
+                                , label = text "Load Statuses"
+                                }
                     , row [ width fill ]
                         [ Input.text
                             [ width fill
