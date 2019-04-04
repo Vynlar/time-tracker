@@ -161,7 +161,7 @@ type Msg
     | DeleteEntry Int
     | TokenSuccess (Result Http.Error String)
     | LoadStatuses
-    | GotStatuses (Result Http.Error (List Entry))
+    | GotStatuses (Result Http.Error (List Api.RemoteStatus))
 
 
 sortLog : List Entry -> List Entry
@@ -188,7 +188,7 @@ createEntry issue model =
             )
 
         Err _ ->
-            ( model, Task.perform (CreateWithTime issue << posixToTime model.timeZone) Time.now )
+            ( model, Task.perform (CreateWithTime issue << BasicTime.posixToTime model.timeZone) Time.now )
 
 
 durationToString : Int -> String
@@ -227,7 +227,7 @@ calculateTotals : Time.Zone -> Time.Posix -> List Entry -> List ( String, Int )
 calculateTotals zone currentTime log =
     let
         currentTimeOutEntry =
-            Entry.newOut 0 (posixToTime zone currentTime)
+            Entry.newOut 0 (BasicTime.posixToTime zone currentTime)
 
         sortedLog =
             sortLog (currentTimeOutEntry :: log)
@@ -260,18 +260,6 @@ calculateTotals zone currentTime log =
         |> removeDuplicates
 
 
-posixToTime : Time.Zone -> Time.Posix -> Time
-posixToTime zone posix =
-    let
-        hours =
-            Time.toHour zone posix
-
-        minutes =
-            Time.toMinute zone posix
-    in
-    BasicTime.new hours minutes BasicTime.am
-
-
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -300,7 +288,7 @@ update msg model =
             )
 
         NowPressed ->
-            ( model, Task.perform (\posix -> ChangeTimeInput ((BasicTime.toString << posixToTime model.timeZone) posix)) Time.now )
+            ( model, Task.perform (\posix -> ChangeTimeInput ((BasicTime.toString << BasicTime.posixToTime model.timeZone) posix)) Time.now )
 
         CurrentTime time ->
             ( { model | currentTime = time }, Cmd.none )
@@ -326,10 +314,28 @@ update msg model =
                     ( model, Api.getStatuses token GotStatuses )
 
         GotStatuses (Err error) ->
-            Debug.todo "handle the error"
+            ( model, Cmd.none )
 
         GotStatuses (Ok statuses) ->
-            Debug.todo "actually do something with the statuses"
+            let
+                ( newNextId, additionalEntries ) =
+                    List.foldl
+                        (\status ( id, acc ) ->
+                            ( id + 1
+                            , Api.remoteStatusToEntry model.timeZone id status :: acc
+                            )
+                        )
+                        ( model.nextId, [] )
+                        statuses
+            in
+            ( { model
+                | log =
+                    model.log
+                        ++ additionalEntries
+                , nextId = newNextId
+              }
+            , Cmd.none
+            )
 
 
 normalShadow : Float -> Attr decorative Msg
@@ -617,7 +623,7 @@ view model =
                                         [ alignRight
                                         , Font.color (rgba 0 0 0 0.5)
                                         ]
-                                        (text <| "Now " ++ (BasicTime.toString << posixToTime model.timeZone) model.currentTime)
+                                        (text <| "Now " ++ (BasicTime.toString << BasicTime.posixToTime model.timeZone) model.currentTime)
                                     ]
                                ]
                     )

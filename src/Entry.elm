@@ -12,6 +12,7 @@ module Entry exposing
 -}
 
 import BasicTime exposing (Time)
+import Json.Decode as Decode
 
 
 type Entry

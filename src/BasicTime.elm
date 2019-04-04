@@ -5,11 +5,14 @@ module BasicTime exposing
     , new
     , parser
     , pm
+    , posixToTime
     , toString
     , toTotalMinutes
+    , unixToTime
     )
 
 import Parser exposing ((|.), (|=), Parser)
+import Time
 
 
 type Time
@@ -188,3 +191,21 @@ timeIntParser =
         |= (Parser.getChompedString (Parser.chompWhile Char.isDigit)
                 |> Parser.andThen parseInt
            )
+
+
+posixToTime : Time.Zone -> Time.Posix -> Time
+posixToTime zone posix =
+    let
+        hours =
+            Time.toHour zone posix
+
+        minutes =
+            Time.toMinute zone posix
+    in
+    new hours minutes am
+
+
+unixToTime : Time.Zone -> Int -> Time
+unixToTime zone unix =
+    Time.millisToPosix (unix * 1000)
+        |> posixToTime zone
